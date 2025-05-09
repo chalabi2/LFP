@@ -1,4 +1,4 @@
-# PeerFinder
+# LookingForPeer
 
 A high-performance Rust web server for discovering and tracking blockchain network peers in the Cosmos ecosystem.
 
@@ -24,15 +24,15 @@ A high-performance Rust web server for discovering and tracking blockchain netwo
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/chalabi2/peerFinder.git
-   cd peerFinder
+   git clone https://github.com/chalabi2/LFP.git
+   cd LFP
    ```
 
 2. Create a `.env` file in the project root:
 
    ```
    # Database connection string
-   DATABASE_URL=postgres://username:password@localhost:5432/peerfinder
+   DATABASE_URL=postgres://username:password@localhost:5432/lfp
 
    # Network RPC URLs
    NEXT_PUBLIC_GRAVITY_BRIDGE_3_RPC_URL=https://nodes.chandrastation.com/rpc/gravity/
@@ -49,7 +49,7 @@ A high-performance Rust web server for discovering and tracking blockchain netwo
 3. Create the PostgreSQL database:
 
    ```bash
-   createdb peerfinder
+   createdb lfp
    ```
 
 4. Build the project:
@@ -62,14 +62,14 @@ A high-performance Rust web server for discovering and tracking blockchain netwo
 ### Starting the server
 
 ```bash
-./target/release/peerFinder
+./target/release/lfp
 ```
 
 ### Command Line Options
 
 ```
 USAGE:
-    peerFinder [OPTIONS]
+    lfp [OPTIONS]
 
 OPTIONS:
     -p, --port <PORT>                            Port to run the web server on [default: 3000]
@@ -97,7 +97,7 @@ OPTIONS:
 
 ## Architecture
 
-PeerFinder works by:
+lfp works by:
 
 1. Starting with a known RPC node for each blockchain network
 2. Fetching peer information from that node

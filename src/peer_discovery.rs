@@ -167,7 +167,7 @@ pub async fn trigger_network_scan(
 fn create_http_client(timeout: Duration) -> Result<Client, AppError> {
     let client = reqwest::Client::builder()
         .timeout(timeout)
-        .user_agent("PeerFinder/0.1.0")
+        .user_agent("lfp/0.1.0")
         .build()
         .map_err(|e| AppError::RequestError(format!("Failed to create HTTP client: {}", e)))?;
 

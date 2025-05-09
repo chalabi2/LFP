@@ -4,7 +4,7 @@ use std::time::Duration;
 /// Command-line interface for the PeerFinder application
 #[derive(Parser, Debug, Clone)]
 #[clap(
-    name = "peerFinder",
+    name = "lfp",
     about = "A Rust web server that rapidly discovers and tracks blockchain network peers",
     version
 )]
