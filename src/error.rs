@@ -9,35 +9,29 @@ use thiserror::Error;
 /// Application error types
 #[derive(Error, Debug)]
 pub enum AppError {
-    #[error("Database error: {0}")]
-    DbError(String),
-
-    #[error("Failed to connect to database: {0}")]
-    DbConnectionError(String),
-
-    #[error("Server error: {0}")]
-    ServerError(String),
-
-    #[error("Task join error: {0}")]
-    TaskJoinError(String),
-
-    #[error("HTTP request error: {0}")]
-    RequestError(String),
-
-    #[error("Invalid IP address: {0}")]
-    InvalidIpError(String),
-
-    #[error("JSON parsing error: {0}")]
-    JsonError(String),
-
     #[error("Configuration error: {0}")]
     ConfigError(String),
 
-    #[error("Resource not found: {0}")]
+    #[error("JSON error: {0}")]
+    JsonError(String),
+
+    #[error("Not found: {0}")]
     NotFoundError(String),
 
-    #[error("Invalid input: {0}")]
-    ValidationError(String),
+    #[error("Request error: {0}")]
+    RequestError(String),
+
+    #[error("Cache error: {0}")]
+    CacheError(String),
+
+    #[error("Database migration error: {0}")]
+    MigrationError(String),
+
+    #[error("Database connection error: {0}")]
+    DbConnectionError(String),
+
+    #[error("Database error: {0}")]
+    DatabaseError(String),
 }
 
 // Utility methods for error conversion
@@ -47,11 +41,15 @@ impl AppError {
     }
 
     pub fn from_sqlx_error(err: sqlx::Error) -> Self {
-        AppError::DbError(err.to_string())
+        AppError::DatabaseError(err.to_string())
     }
 
     pub fn from_serde_error(err: serde_json::Error) -> Self {
         AppError::JsonError(err.to_string())
+    }
+
+    pub fn from_redis_error(err: redis::RedisError) -> Self {
+        AppError::CacheError(err.to_string())
     }
 }
 
@@ -80,20 +78,24 @@ impl From<std::env::VarError> for AppError {
     }
 }
 
+impl From<redis::RedisError> for AppError {
+    fn from(err: redis::RedisError) -> Self {
+        Self::from_redis_error(err)
+    }
+}
+
 // Implement axum's IntoResponse for HTTP error responses
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, error_message) = match self {
-            AppError::DbError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
-            AppError::DbConnectionError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
-            AppError::ServerError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
-            AppError::TaskJoinError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
-            AppError::RequestError(_) => (StatusCode::BAD_GATEWAY, self.to_string()),
-            AppError::InvalidIpError(_) => (StatusCode::BAD_REQUEST, self.to_string()),
             AppError::JsonError(_) => (StatusCode::BAD_REQUEST, self.to_string()),
+            AppError::DatabaseError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+            AppError::DbConnectionError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             AppError::ConfigError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             AppError::NotFoundError(_) => (StatusCode::NOT_FOUND, self.to_string()),
-            AppError::ValidationError(_) => (StatusCode::BAD_REQUEST, self.to_string()),
+            AppError::RequestError(_) => (StatusCode::BAD_GATEWAY, self.to_string()),
+            AppError::CacheError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+            AppError::MigrationError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
         };
 
         // Create a JSON response with error details

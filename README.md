@@ -38,7 +38,7 @@ A high-performance Rust web server for discovering and tracking blockchain netwo
    NEXT_PUBLIC_GRAVITY_BRIDGE_3_RPC_URL=https://nodes.chandrastation.com/rpc/gravity/
    NEXT_PUBLIC_JUNO_1_RPC_URL=https://nodes.chandrastation.com/rpc/juno/
    NEXT_PUBLIC_OSMOSIS_1_RPC_URL=https://nodes.chandrastation.com/rpc/osmosis/
-   NEXT_PUBLIC_OMNIFLIXHUB_1_RPC_URL=https://nodes.chandrastation.com/rpc/omniflix/
+   NEXT_PUBLIC_OMNIFLIX_1_RPC_URL=https://nodes.chandrastation.com/rpc/omniflix/
    NEXT_PUBLIC_CHIHUAHUA_1_RPC_URL=https://nodes.chandrastation.com/rpc/chihuahua/
    NEXT_PUBLIC_ALTHEA_258432_1_RPC_URL=https://nodes.chandrastation.com/rpc/althea/
    NEXT_PUBLIC_CANTO_7700_1_RPC_URL=https://nodes.chandrastation.com/rpc/canto/

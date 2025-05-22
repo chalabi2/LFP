@@ -2,9 +2,23 @@ use crate::error::AppError;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::env;
+use std::time::Duration;
 
-const DEFAULT_REQUEST_TIMEOUT: u64 = 5; // 5 seconds
-const RPC_TIMEOUT: u64 = 10; // 10 seconds for RPC requests
+const DEFAULT_REQUEST_TIMEOUT: u64 = 2; // 5 seconds
+
+// Map of networks that require special handling
+lazy_static! {
+    static ref NETWORK_TIMEOUTS: HashMap<&'static str, u64> = {
+        let mut map = HashMap::new();
+        // Networks that need longer timeouts
+        map.insert("akash", 2);     // Akash needs 20 seconds
+        map.insert("juno", 2);      // Juno needs 15 seconds
+        map.insert("saga", 2);      // Saga needs 15 seconds
+        map.insert("omniflix", 2);  // OmniFlix needs 15 seconds
+        map.insert("althea", 2);    // Althea needs 15 seconds
+        map
+    };
+}
 
 /// Application configuration
 #[derive(Debug, Clone)]
@@ -14,6 +28,9 @@ pub struct Config {
 
     /// Request timeout in seconds
     pub request_timeout: u64,
+
+    /// Network-specific timeouts
+    pub network_timeouts: HashMap<String, Duration>,
 }
 
 impl Config {
@@ -21,6 +38,7 @@ impl Config {
     pub fn from_env() -> Result<Self, AppError> {
         // Initialize an empty network map
         let mut networks = HashMap::new();
+        let mut network_timeouts = HashMap::new();
 
         // RPC URL environment variables follow the pattern NEXT_PUBLIC_<NETWORK>_RPC_URL
         for (key, value) in env::vars() {
@@ -34,6 +52,17 @@ impl Config {
 
                 // Convert to a standardized format (capitalize first letter, lowercase rest)
                 let network_name = normalize_network_name(network_part);
+
+                // Check if this network needs a special timeout
+                let network_lowercase = network_name.to_lowercase();
+                if let Some(timeout) = NETWORK_TIMEOUTS.get(network_lowercase.as_str()) {
+                    network_timeouts.insert(network_name.clone(), Duration::from_secs(*timeout));
+                    tracing::info!(
+                        "Using custom timeout of {}s for network {}",
+                        timeout,
+                        network_name
+                    );
+                }
 
                 // Add to our networks map
                 networks.insert(network_name, value);
@@ -55,6 +84,7 @@ impl Config {
         Ok(Config {
             networks,
             request_timeout,
+            network_timeouts,
         })
     }
 
@@ -79,20 +109,33 @@ impl Config {
         // Get primary URL
         let primary_url = self.get_rpc_url(&normalized_name)?;
 
-        // Generate Polkachu fallback URL
-        // Convert to lowercase for the Polkachu URL format
+        // Generate fallback URL - try different well-known providers
+        // Convert to lowercase for the URL format
         let network_lower = normalized_name.to_lowercase();
 
-        // Special case for OmniFlixHub
-        let polkachu_network = if network_lower == "omniflixhub" {
-            "omniflix".to_string()
-        } else {
-            network_lower
-        };
-
-        let fallback_url = format!("https://{}-rpc.polkachu.com/", polkachu_network);
+        // Generate a fallback URL based on the network
+        let fallback_url = generate_fallback_url(&network_lower);
 
         Some((primary_url.clone(), fallback_url))
+    }
+
+    /// Get network-specific timeout if available, otherwise return default
+    pub fn get_network_timeout(&self, network: &str) -> Duration {
+        let normalized_name = normalize_network_name(network);
+
+        // Check for custom timeout in config
+        if let Some(timeout) = self.network_timeouts.get(&normalized_name) {
+            return *timeout;
+        }
+
+        // Check predefined timeouts for known networks
+        let network_lower = normalized_name.to_lowercase();
+        if let Some(timeout) = NETWORK_TIMEOUTS.get(network_lower.as_str()) {
+            return Duration::from_secs(*timeout);
+        }
+
+        // Return default timeout
+        Duration::from_secs(self.request_timeout)
     }
 }
 
@@ -119,4 +162,25 @@ fn normalize_network_name(name: &str) -> String {
             }
         })
         .collect()
+}
+
+/// Generate the best fallback URL for a given network
+fn generate_fallback_url(network: &str) -> String {
+    // Use network name directly - no special case needed anymore
+    let polkachu_network = network;
+
+    // Try multiple fallback providers - return the first one that matches
+    match network {
+        // Networks with known custom providers
+        "juno" => "https://juno-rpc.polkachu.com/".to_string(),
+        "osmosis" => "https://osmosis-rpc.polkachu.com/".to_string(),
+        "akash" => "https://akash-rpc.polkachu.com/".to_string(),
+        "sentinel" => "https://sentinel-rpc.polkachu.com/".to_string(),
+        "stargaze" => "https://stargaze-rpc.polkachu.com/".to_string(),
+        "injective" => "https://injective-rpc.polkachu.com/".to_string(),
+        "cosmoshub" => "https://cosmos-rpc.polkachu.com/".to_string(),
+        "gravitybridge" => "https://gravity-rpc.polkachu.com/".to_string(),
+        // Default to the generic Polkachu format
+        _ => format!("https://{}-rpc.polkachu.com/", polkachu_network),
+    }
 }

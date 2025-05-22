@@ -38,7 +38,7 @@ pub struct Cli {
     pub max_depth: usize,
 
     /// Timeout for HTTP requests in seconds
-    #[clap(long, default_value = "5")]
+    #[clap(long, default_value = "10")]
     pub request_timeout: u64,
 
     /// Run an immediate scan on startup
@@ -46,8 +46,12 @@ pub struct Cli {
     pub scan_on_startup: bool,
 
     /// The maximum number of concurrent requests
-    #[clap(long, default_value = "100")]
+    #[clap(long, default_value = "25")]
     pub max_concurrent_requests: usize,
+
+    /// Maximum number of chains to process concurrently
+    #[clap(long, default_value = "3")]
+    pub concurrent_chains: usize,
 }
 
 impl Cli {
@@ -59,15 +63,5 @@ impl Cli {
     /// Get the scan interval as a Duration
     pub fn scan_interval(&self) -> Duration {
         Duration::from_secs(self.scan_interval)
-    }
-
-    /// Check if there's no limit on recursive depth
-    pub fn is_unlimited_depth(&self) -> bool {
-        self.max_depth == 0
-    }
-
-    /// Check if there's no limit on number of peers
-    pub fn is_unlimited_peers(&self) -> bool {
-        self.max_peers == 0
     }
 }
