@@ -20,10 +20,13 @@ pub static FAILED_ENDPOINTS: Lazy<Mutex<HashMap<String, (Instant, usize)>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 /// Cooldown period for failed endpoints (5 minutes)
+#[allow(dead_code)]
 const ENDPOINT_COOLDOWN: Duration = Duration::from_secs(0);
 /// Maximum failure count before longer cooldown
+#[allow(dead_code)]
 const MAX_FAILURES: usize = 1;
 /// Extended cooldown for repeated failures (30 minutes)
+#[allow(dead_code)]
 const EXTENDED_COOLDOWN: Duration = Duration::from_secs(0);
 
 /// Add or replace peers for a specific network in the cache
@@ -64,7 +67,7 @@ pub fn get_cached_peers(network: &str) -> Vec<PeerInfo> {
 }
 
 /// Get all discovered peers for a specific network
-pub fn get_all_discovered_peers(network: &str) -> Vec<PeerInfo> {
+pub fn _get_all_discovered_peers(network: &str) -> Vec<PeerInfo> {
     let all_peers_guard = ALL_DISCOVERED_PEERS.lock();
     match all_peers_guard.get(network) {
         Some(peers_set) => peers_set.iter().cloned().collect(),
@@ -94,7 +97,7 @@ pub fn mark_endpoint_failed(network: &str, url: &str) {
 }
 
 /// Check if an endpoint is currently in a failed cooldown period
-pub fn is_endpoint_failed(network: &str, url: &str) -> bool {
+pub fn _is_endpoint_failed(network: &str, url: &str) -> bool {
     let key = format!("{}:{}", network, url);
     let failed_guard = FAILED_ENDPOINTS.lock();
 

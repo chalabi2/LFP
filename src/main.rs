@@ -109,22 +109,14 @@ async fn main() -> std::io::Result<()> {
         let peer_discovery_cli = cli.clone();
         // Create a new receiver for this task
         let shutdown_rx = shutdown_tx.subscribe();
-        let shutdown_tx_clone = shutdown_tx.clone();
 
         // Start in a separate task
         let handle = tokio::spawn(async move {
-            // Create shutdown receiver before the select macro
-            let mut select_rx = shutdown_tx_clone.subscribe();
-
-            tokio::select! {
-                result = peer_discovery::spawn_discovery_service(pool, peer_discovery_cli, Some(shutdown_rx)) => {
-                    if let Err(e) = result {
-                        tracing::error!("Peer discovery service failed: {}", e);
-                    }
-                }
-                _ = select_rx.recv() => {
-                    tracing::info!("Shutting down peer discovery service");
-                }
+            if let Err(e) =
+                peer_discovery::spawn_discovery_service(pool, peer_discovery_cli, Some(shutdown_rx))
+                    .await
+            {
+                tracing::error!("Peer discovery service failed: {}", e);
             }
         });
         task_handles.push(handle);
@@ -134,21 +126,13 @@ async fn main() -> std::io::Result<()> {
         let peer_discovery_cli = cli.clone();
         // Create a new receiver for this task
         let shutdown_rx = shutdown_tx.subscribe();
-        let shutdown_tx_clone = shutdown_tx.clone();
 
         let handle = tokio::spawn(async move {
-            // Create shutdown receiver before the select macro
-            let mut select_rx = shutdown_tx_clone.subscribe();
-
-            tokio::select! {
-                result = peer_discovery::spawn_memory_only_discovery(peer_discovery_cli, Some(shutdown_rx)) => {
-                    if let Err(e) = result {
-                        tracing::error!("In-memory peer discovery failed: {}", e);
-                    }
-                }
-                _ = select_rx.recv() => {
-                    tracing::info!("Shutting down in-memory peer discovery");
-                }
+            if let Err(e) =
+                peer_discovery::spawn_memory_only_discovery(peer_discovery_cli, Some(shutdown_rx))
+                    .await
+            {
+                tracing::error!("In-memory peer discovery failed: {}", e);
             }
         });
         task_handles.push(handle);

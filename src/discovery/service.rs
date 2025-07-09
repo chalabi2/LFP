@@ -25,6 +25,7 @@ const MAX_SCAN_TIME_PER_CHAIN: Duration = Duration::from_secs(3600); // 1 hour
 const WORKERS_PER_CHAIN: usize = 25; // Number of concurrent workers per chain
 
 // Add in the struct that manages scanning
+#[allow(dead_code)]
 struct NetworkScanState {
     // Maximum number of consecutive scans with minimal change
     max_stable_scans: usize,
@@ -41,6 +42,7 @@ struct NetworkScanState {
 }
 
 impl NetworkScanState {
+    #[allow(dead_code)]
     fn new() -> Self {
         Self {
             max_stable_scans: 3,
@@ -52,6 +54,7 @@ impl NetworkScanState {
         }
     }
 
+    #[allow(dead_code)]
     fn update_peer_count(&mut self, network: &str, new_count: usize) -> bool {
         // Record scan count
         *self.scan_count.entry(network.to_string()).or_insert(0) += 1;
@@ -107,6 +110,7 @@ impl NetworkScanState {
         should_continue
     }
 
+    #[allow(dead_code)]
     fn should_scan_network(&self, network: &str) -> bool {
         let stable_count = *self.stable_scan_count.get(network).unwrap_or(&0);
         stable_count < self.max_stable_scans
@@ -114,6 +118,7 @@ impl NetworkScanState {
 }
 
 /// Start the peer discovery service that continuously scans for peers
+#[allow(dead_code)]
 pub async fn start_discovery_service(
     db_pool: Pool<Postgres>,
     cli: Cli,
@@ -152,22 +157,52 @@ pub async fn start_discovery_service(
     loop {
         // Check for shutdown signal before starting a new scanning cycle
         if let Some(ref mut rx) = shutdown_rx {
-            if rx.try_recv().is_ok() {
-                tracing::info!("Received shutdown signal, stopping discovery service");
-                // Forward shutdown signal to all active workers
-                let _ = worker_shutdown_tx.send(());
-                break;
+            match rx.try_recv() {
+                Ok(_) => {
+                    tracing::info!("Received shutdown signal, stopping discovery service");
+                    // Forward shutdown signal to all active workers
+                    let _ = worker_shutdown_tx.send(());
+                    break;
+                }
+                Err(broadcast::error::TryRecvError::Empty) => {
+                    // No shutdown signal yet, continue
+                }
+                Err(broadcast::error::TryRecvError::Closed) => {
+                    tracing::info!("Shutdown channel closed, stopping discovery service");
+                    let _ = worker_shutdown_tx.send(());
+                    break;
+                }
+                Err(broadcast::error::TryRecvError::Lagged(_)) => {
+                    tracing::info!("Shutdown signal lagged, stopping discovery service");
+                    let _ = worker_shutdown_tx.send(());
+                    break;
+                }
             }
         }
 
         for network in &all_networks {
             // Check for shutdown signal before starting each network
             if let Some(ref mut rx) = shutdown_rx {
-                if rx.try_recv().is_ok() {
-                    tracing::info!("Received shutdown signal, stopping discovery service");
-                    // Forward shutdown signal to all active workers
-                    let _ = worker_shutdown_tx.send(());
-                    break;
+                match rx.try_recv() {
+                    Ok(_) => {
+                        tracing::info!("Received shutdown signal, stopping discovery service");
+                        // Forward shutdown signal to all active workers
+                        let _ = worker_shutdown_tx.send(());
+                        break;
+                    }
+                    Err(broadcast::error::TryRecvError::Empty) => {
+                        // No shutdown signal yet, continue
+                    }
+                    Err(broadcast::error::TryRecvError::Closed) => {
+                        tracing::info!("Shutdown channel closed, stopping discovery service");
+                        let _ = worker_shutdown_tx.send(());
+                        break;
+                    }
+                    Err(broadcast::error::TryRecvError::Lagged(_)) => {
+                        tracing::info!("Shutdown signal lagged, stopping discovery service");
+                        let _ = worker_shutdown_tx.send(());
+                        break;
+                    }
                 }
             }
 
@@ -281,11 +316,26 @@ pub async fn start_discovery_service(
 
         // Check for shutdown signal after completing a full cycle
         if let Some(ref mut rx) = shutdown_rx {
-            if rx.try_recv().is_ok() {
-                tracing::info!("Received shutdown signal, stopping discovery service");
-                // Forward shutdown signal to all active workers
-                let _ = worker_shutdown_tx.send(());
-                break;
+            match rx.try_recv() {
+                Ok(_) => {
+                    tracing::info!("Received shutdown signal, stopping discovery service");
+                    // Forward shutdown signal to all active workers
+                    let _ = worker_shutdown_tx.send(());
+                    break;
+                }
+                Err(broadcast::error::TryRecvError::Empty) => {
+                    // No shutdown signal yet, continue
+                }
+                Err(broadcast::error::TryRecvError::Closed) => {
+                    tracing::info!("Shutdown channel closed, stopping discovery service");
+                    let _ = worker_shutdown_tx.send(());
+                    break;
+                }
+                Err(broadcast::error::TryRecvError::Lagged(_)) => {
+                    tracing::info!("Shutdown signal lagged, stopping discovery service");
+                    let _ = worker_shutdown_tx.send(());
+                    break;
+                }
             }
         }
 
@@ -318,7 +368,6 @@ async fn scan_chain_with_multiple_workers(
     // Manage worker handles
     let mut workers = Vec::new();
     let mut failed_endpoints = HashSet::new();
-    let mut active_workers = 0;
     let max_workers = 10; // Lower this to reduce parallel scanning
     let max_consecutive_failures = 3;
     let mut consecutive_failures = 0;
@@ -367,7 +416,7 @@ async fn scan_chain_with_multiple_workers(
         .await,
     );
 
-    active_workers = 2;
+    let mut active_workers = 2;
     let mut worker_index = 0;
 
     // Main worker management loop
@@ -524,7 +573,7 @@ async fn scan_chain_with_multiple_workers(
     }
 
     // Wait for all remaining workers to finish or kill them after timeout
-    let mut timeout = Duration::from_secs(10); // Short timeout before we force stop workers
+    let timeout = Duration::from_secs(10); // Short timeout before we force stop workers
     if !workers.is_empty() {
         tracing::info!(
             "Waiting for {} remaining workers for network {} to finish",
@@ -562,10 +611,10 @@ async fn spawn_scan_worker(
     url: &str,
     client: &Client,
     cli: &Cli,
-    discovered_peers: Arc<Mutex<HashSet<String>>>,
+    _discovered_peers: Arc<Mutex<HashSet<String>>>,
     should_stop: Arc<Mutex<bool>>,
     semaphore: Arc<Semaphore>,
-    scan_start: Instant,
+    _scan_start: Instant,
     mut worker_shutdown_rx: broadcast::Receiver<()>,
 ) -> tokio::task::JoinHandle<()> {
     let db_pool = db_pool.clone();
@@ -609,6 +658,7 @@ async fn spawn_scan_worker(
 }
 
 /// Scan a chain using cached peers
+#[allow(dead_code)]
 async fn scan_chain_with_cached_peers(
     db_pool: &Pool<Postgres>,
     network: &str,
@@ -629,9 +679,12 @@ async fn scan_chain_with_cached_peers(
     }
 
     // Shuffle the peers to avoid hitting the same ones repeatedly
-    let mut rng = rand::rng();
-    let mut shuffled_peers = cached_peers.clone();
-    shuffled_peers.shuffle(&mut rng);
+    let shuffled_peers = {
+        let mut rng = rand::thread_rng();
+        let mut shuffled_peers = cached_peers.clone();
+        shuffled_peers.shuffle(&mut rng);
+        shuffled_peers
+    };
 
     // Use a semaphore to limit concurrent requests
     let semaphore = Arc::new(Semaphore::new(WORKERS_PER_CHAIN));
@@ -797,31 +850,21 @@ pub async fn trigger_network_scan(
     }
 }
 
-/// Spawn the discovery service in a background task with its own runtime
+/// Spawn the discovery service in a background task
+#[allow(dead_code)]
 pub async fn spawn_discovery_service(
     pool: Pool<Postgres>,
     cli: Cli,
     shutdown_rx: Option<broadcast::Receiver<()>>,
 ) -> Result<(), AppError> {
-    tokio::task::spawn_blocking(move || {
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(start_discovery_service(pool, cli, shutdown_rx))
-    })
-    .await
-    .map_err(|e| AppError::RequestError(e.to_string()))?
+    start_discovery_service(pool, cli, shutdown_rx).await
 }
 
 /// Spawn the memory-only discovery service in a background task
+#[allow(dead_code)]
 pub async fn spawn_memory_only_discovery(
     cli: Cli,
     shutdown_rx: Option<broadcast::Receiver<()>>,
 ) -> Result<(), AppError> {
-    tokio::task::spawn_blocking(move || {
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(run_memory_only_discovery(cli, shutdown_rx))
-    })
-    .await
-    .map_err(|e| AppError::RequestError(e.to_string()))?
+    run_memory_only_discovery(cli, shutdown_rx).await
 }

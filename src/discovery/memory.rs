@@ -48,9 +48,22 @@ pub async fn run_memory_only_discovery(
     if let Some(network) = &cli.network {
         // Check for shutdown signal
         if let Some(ref mut rx) = shutdown_rx {
-            if rx.try_recv().is_ok() {
-                tracing::info!("Received shutdown signal, stopping memory-only discovery");
-                return Ok(());
+            match rx.try_recv() {
+                Ok(_) => {
+                    tracing::info!("Received shutdown signal, stopping memory-only discovery");
+                    return Ok(());
+                }
+                Err(broadcast::error::TryRecvError::Empty) => {
+                    // No shutdown signal yet, continue
+                }
+                Err(broadcast::error::TryRecvError::Closed) => {
+                    tracing::info!("Shutdown channel closed, stopping memory-only discovery");
+                    return Ok(());
+                }
+                Err(broadcast::error::TryRecvError::Lagged(_)) => {
+                    tracing::info!("Shutdown signal lagged, stopping memory-only discovery");
+                    return Ok(());
+                }
             }
         }
 
@@ -183,11 +196,28 @@ pub async fn run_memory_only_discovery(
         loop {
             // Check for shutdown signal
             if let Some(ref mut rx) = shutdown_rx {
-                if rx.try_recv().is_ok() {
-                    tracing::info!(
-                        "Received shutdown signal, stopping continuous memory-only discovery"
-                    );
-                    break;
+                match rx.try_recv() {
+                    Ok(_) => {
+                        tracing::info!(
+                            "Received shutdown signal, stopping continuous memory-only discovery"
+                        );
+                        break;
+                    }
+                    Err(broadcast::error::TryRecvError::Empty) => {
+                        // No shutdown signal yet, continue
+                    }
+                    Err(broadcast::error::TryRecvError::Closed) => {
+                        tracing::info!(
+                            "Shutdown channel closed, stopping continuous memory-only discovery"
+                        );
+                        break;
+                    }
+                    Err(broadcast::error::TryRecvError::Lagged(_)) => {
+                        tracing::info!(
+                            "Shutdown signal lagged, stopping continuous memory-only discovery"
+                        );
+                        break;
+                    }
                 }
             }
 
@@ -271,11 +301,28 @@ pub async fn run_memory_only_discovery(
 
             // Check for shutdown signal after completing a scan cycle
             if let Some(ref mut rx) = shutdown_rx {
-                if rx.try_recv().is_ok() {
-                    tracing::info!(
-                        "Received shutdown signal, stopping continuous memory-only discovery"
-                    );
-                    break;
+                match rx.try_recv() {
+                    Ok(_) => {
+                        tracing::info!(
+                            "Received shutdown signal, stopping continuous memory-only discovery"
+                        );
+                        break;
+                    }
+                    Err(broadcast::error::TryRecvError::Empty) => {
+                        // No shutdown signal yet, continue
+                    }
+                    Err(broadcast::error::TryRecvError::Closed) => {
+                        tracing::info!(
+                            "Shutdown channel closed, stopping continuous memory-only discovery"
+                        );
+                        break;
+                    }
+                    Err(broadcast::error::TryRecvError::Lagged(_)) => {
+                        tracing::info!(
+                            "Shutdown signal lagged, stopping continuous memory-only discovery"
+                        );
+                        break;
+                    }
                 }
             }
         }
@@ -301,9 +348,12 @@ async fn memory_scan_from_cached_peers(
     }
 
     // Shuffle the peers to avoid hitting the same one repeatedly in multiple runs
-    let mut rng = rand::rng();
-    let mut shuffled_peers = cached_peers.clone();
-    shuffled_peers.shuffle(&mut rng);
+    let shuffled_peers = {
+        let mut rng = rand::thread_rng();
+        let mut shuffled_peers = cached_peers.clone();
+        shuffled_peers.shuffle(&mut rng);
+        shuffled_peers
+    };
 
     // Try just the first peer
     if let Some(peer) = shuffled_peers.first() {

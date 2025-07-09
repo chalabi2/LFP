@@ -90,7 +90,7 @@ pub async fn configure_cache(
 }
 
 /// Clear the entire cache
-pub async fn clear_cache() -> Result<(), AppError> {
+pub async fn _clear_cache() -> Result<(), AppError> {
     let mut cache = DB_CACHE.lock().await;
     *cache = DatabaseCache::default();
     Ok(())

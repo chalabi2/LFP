@@ -6,6 +6,7 @@ use crate::discovery::{ALL_DISCOVERED_PEERS, KNOWN_GOOD_PEERS};
 use crate::{cli::Cli, config::Config, error::AppError, models::PeerGeoInfo, peer_discovery};
 
 // Configure API routes
+#[allow(dead_code)]
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("")

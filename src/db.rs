@@ -253,6 +253,7 @@ pub async fn create_pool(db_url: &str) -> Result<Pool<Postgres>, AppError> {
 }
 
 /// Run database migrations
+#[allow(dead_code)]
 pub async fn run_migrations(pool: &Pool<Postgres>) -> Result<(), AppError> {
     tracing::info!("Running database migrations");
 
@@ -307,7 +308,7 @@ pub async fn run_migrations(pool: &Pool<Postgres>) -> Result<(), AppError> {
 }
 
 /// Get peers by network with optional active filter and pagination
-pub async fn get_peers_by_network_with_filter_and_pagination(
+pub async fn _get_peers_by_network_with_filter_and_pagination(
     pool: &Pool<Postgres>,
     network: &str,
     active_filter: Option<bool>,
