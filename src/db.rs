@@ -257,11 +257,11 @@ pub async fn create_pool(db_url: &str) -> Result<Pool<Postgres>, AppError> {
 pub async fn run_migrations(pool: &Pool<Postgres>) -> Result<(), AppError> {
     tracing::info!("Running database migrations");
 
-    // Create the peers table if it doesn't exist
+    // Create the PeerNode table if it doesn't exist
     sqlx::query(
         r#"
-        CREATE TABLE IF NOT EXISTS peers (
-            id SERIAL PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS "PeerNode" (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             ip TEXT NOT NULL,
             network TEXT NOT NULL,
             rpc_address TEXT,
@@ -281,12 +281,12 @@ pub async fn run_migrations(pool: &Pool<Postgres>) -> Result<(), AppError> {
     )
     .execute(pool)
     .await
-    .map_err(|e| AppError::MigrationError(format!("Failed to create peers table: {}", e)))?;
+    .map_err(|e| AppError::MigrationError(format!("Failed to create PeerNode table: {}", e)))?;
 
     // Create index on network for faster queries
     sqlx::query(
         r#"
-        CREATE INDEX IF NOT EXISTS idx_peers_network ON peers(network);
+        CREATE INDEX IF NOT EXISTS idx_peernode_network ON "PeerNode"(network);
         "#,
     )
     .execute(pool)
@@ -296,7 +296,7 @@ pub async fn run_migrations(pool: &Pool<Postgres>) -> Result<(), AppError> {
     // Create index on country for faster queries
     sqlx::query(
         r#"
-        CREATE INDEX IF NOT EXISTS idx_peers_country ON peers(country);
+        CREATE INDEX IF NOT EXISTS idx_peernode_country ON "PeerNode"(country);
         "#,
     )
     .execute(pool)
