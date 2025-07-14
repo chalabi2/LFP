@@ -3,7 +3,7 @@ use clap::Parser;
 use dotenv::dotenv;
 use std::env;
 use tokio::signal;
-use tokio::sync::broadcast;
+use tokio::sync::broadcast; // If shuffle is used here, but probably not.
 
 mod api;
 mod cache;

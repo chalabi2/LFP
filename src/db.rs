@@ -2,7 +2,6 @@ use chrono::Utc;
 use sqlx::migrate::MigrateDatabase;
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 use std::time::Duration;
-use uuid::Uuid;
 
 use crate::{
     error::AppError,
@@ -34,26 +33,29 @@ pub async fn upsert_peers_batch(
         for peer in chunk {
             sqlx::query(
                 r#"
-                INSERT INTO "PeerNode" 
-                ("id", "ip", "network", "rpc_address", "country", "region", "province", "state", "city", "isp", "lat", "lon", "last_seen", "active")
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-                ON CONFLICT ("ip", "network") DO UPDATE SET
-                "rpc_address" = EXCLUDED."rpc_address",
-                "country" = EXCLUDED."country",
-                "region" = EXCLUDED."region",
-                "province" = EXCLUDED."province",
-                "state" = EXCLUDED."state",
-                "city" = EXCLUDED."city",
-                "isp" = EXCLUDED."isp",
-                "lat" = EXCLUDED."lat",
-                "lon" = EXCLUDED."lon",
-                "last_seen" = EXCLUDED."last_seen",
-                "active" = EXCLUDED."active"
+                INSERT INTO "PeerNode" (
+                    ip, network, rpc_address, country, region, province, state, city, isp, lat, lon, last_seen, active, is_live, node_id, p2p_port
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), TRUE, $12, $13, $14)
+                ON CONFLICT (ip, network) DO UPDATE SET
+                    rpc_address = EXCLUDED.rpc_address,
+                    country = EXCLUDED.country,
+                    region = EXCLUDED.region,
+                    province = EXCLUDED.province,
+                    state = EXCLUDED.state,
+                    city = EXCLUDED.city,
+                    isp = EXCLUDED.isp,
+                    lat = EXCLUDED.lat,
+                    lon = EXCLUDED.lon,
+                    last_seen = NOW(),
+                    active = TRUE,
+                    is_live = EXCLUDED.is_live,
+                    node_id = EXCLUDED.node_id,
+                    p2p_port = EXCLUDED.p2p_port
                 "#
             )
-            .bind(Uuid::new_v4())
             .bind(&peer.ip)
-            .bind(&peer.network)
+            .bind(network)
             .bind(&peer.rpc_address)
             .bind(&peer.country)
             .bind(&peer.region)
@@ -63,8 +65,9 @@ pub async fn upsert_peers_batch(
             .bind(&peer.isp)
             .bind(peer.lat)
             .bind(peer.lon)
-            .bind(Utc::now())
-            .bind(true)
+            .bind(peer.is_live)
+            .bind(&peer.node_id)
+            .bind(peer.p2p_port.map(|p| p as i32))
             .execute(&mut *tx)
             .await
             .map_err(|e| AppError::DatabaseError(format!("Failed to upsert peer: {}", e)))?;
@@ -275,6 +278,9 @@ pub async fn run_migrations(pool: &Pool<Postgres>) -> Result<(), AppError> {
             lon DOUBLE PRECISION,
             last_seen TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
             active BOOLEAN NOT NULL DEFAULT TRUE,
+            is_live BOOLEAN,
+            node_id TEXT,
+            p2p_port INTEGER,
             UNIQUE(ip, network)
         )
         "#,
@@ -282,6 +288,17 @@ pub async fn run_migrations(pool: &Pool<Postgres>) -> Result<(), AppError> {
     .execute(pool)
     .await
     .map_err(|e| AppError::MigrationError(format!("Failed to create PeerNode table: {}", e)))?;
+
+    // Add is_live column if not exists
+    sqlx::query(
+        r#"
+        ALTER TABLE "PeerNode"
+        ADD COLUMN IF NOT EXISTS is_live BOOLEAN;
+        "#,
+    )
+    .execute(pool)
+    .await
+    .ok(); // Ignore errors
 
     // Create index on network for faster queries
     sqlx::query(

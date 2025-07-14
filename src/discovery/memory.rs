@@ -5,8 +5,11 @@ use crate::{
     models::{PeerGeoInfo, PeerInfo},
 };
 use parking_lot::Mutex;
+use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
+use rand::thread_rng;
 use rand::Rng;
+use rand::SeedableRng;
 use reqwest::Client;
 use std::{
     collections::{HashMap, HashSet},
@@ -245,7 +248,7 @@ pub async fn run_memory_only_discovery(
                         let _permit = semaphore.acquire().await.unwrap();
 
                         // Add small random delay to stagger requests
-                        let delay = rand::thread_rng().gen_range(0..1000);
+                        let delay = thread_rng().gen_range(0..1000);
                         tokio::time::sleep(Duration::from_millis(delay)).await;
 
                         if use_peer_cache {
@@ -349,7 +352,8 @@ async fn memory_scan_from_cached_peers(
 
     // Shuffle the peers to avoid hitting the same one repeatedly in multiple runs
     let shuffled_peers = {
-        let mut rng = rand::thread_rng();
+        let mut local_rng = thread_rng();
+        let mut rng = SmallRng::from_rng(&mut local_rng).unwrap();
         let mut shuffled_peers = cached_peers.clone();
         shuffled_peers.shuffle(&mut rng);
         shuffled_peers

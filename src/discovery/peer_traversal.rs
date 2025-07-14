@@ -1,10 +1,18 @@
-use crate::{error::AppError, models::PeerInfo};
+use crate::{
+    error::AppError,
+    models::{PeerInfo, StatusResponse},
+};
 use futures::stream::{self, StreamExt};
 use parking_lot::Mutex;
+use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
-use reqwest::Client;
+use rand::thread_rng;
+use rand::SeedableRng;
+use reqwest::{Client, Error as ReqwestError, Response};
+use std::collections::HashMap;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::Semaphore;
+use tokio::time::error::Elapsed;
 
 use super::{
     peer_parser::fetch_peer_info,
@@ -70,35 +78,32 @@ pub async fn follow_rpc_addresses(
     max_peers: usize,
     max_concurrent: usize,
 ) -> Result<Vec<PeerInfo>, AppError> {
-    // Initialize result with initial peers
-    let mut all_peers: Vec<PeerInfo> = initial_peers.to_vec();
+    let all_peers = Arc::new(Mutex::new(
+        initial_peers
+            .iter()
+            .cloned()
+            .map(|p| (p.ip.clone(), p.clone()))
+            .collect::<HashMap<_, _>>(),
+    ));
 
-    // Create a set to efficiently track IPs we've already seen
-    let mut seen_ips = HashSet::new();
-    for peer in &all_peers {
-        seen_ips.insert(peer.ip.clone());
-    }
+    let mut seen_ips: HashSet<String> = all_peers.lock().keys().cloned().collect();
 
-    // Use a queue for breadth-first search, but only add peers with valid public IPs to the queue
-    // We still store all peers in all_peers regardless of IP type
     let mut queue: Vec<PeerInfo> = initial_peers
         .iter()
         .filter(|peer| is_valid_public_ip(&peer.ip))
         .cloned()
         .collect();
 
-    // Limit the total number of peers we'll try to query to avoid excessive requests
     let max_query_attempts = if max_peers > 0 { max_peers } else { 50 };
     let mut attempted_queries = 0;
 
     let mut current_depth = 0;
 
-    // Use a smaller queue size for each depth level to avoid querying too many peers
     let max_peers_per_depth = 10;
 
     while !queue.is_empty() && (max_depth == 0 || current_depth < max_depth) {
         // Check if we've reached the maximum number of peers
-        if max_peers > 0 && all_peers.len() >= max_peers {
+        if max_peers > 0 && all_peers.lock().len() >= max_peers {
             tracing::info!("Reached maximum peer limit of {}", max_peers);
             break;
         }
@@ -112,7 +117,6 @@ pub async fn follow_rpc_addresses(
             break;
         }
 
-        // Process limited peers at the current depth level
         let peers_limit = std::cmp::min(max_peers_per_depth, queue.len());
         let peers_at_current_depth = queue[0..peers_limit].to_vec();
         queue = queue[peers_limit..].to_vec();
@@ -129,36 +133,74 @@ pub async fn follow_rpc_addresses(
 
         attempted_queries += peers_at_current_depth.len();
 
-        // Use a semaphore to limit concurrent requests
         let semaphore = Arc::new(Semaphore::new(max_concurrent));
 
-        // Use a stream to process peers concurrently with rate limiting
         let results = stream::iter(peers_at_current_depth)
             .map(|peer| {
                 let peer_clone = peer.clone();
                 let client = client.clone();
                 let visited_clone = visited.clone();
+                let all_peers_clone = all_peers.clone();
                 let network = network.to_string();
                 let semaphore = semaphore.clone();
 
                 async move {
-                    // Acquire permit to limit concurrency
                     let _permit = semaphore.acquire().await.unwrap();
 
                     if let Some(url_to_fetch) = resolve_rpc_url(&peer_clone) {
-                        // Skip if we've already visited this URL - do this first and return early
                         {
                             let mut visited_guard = visited_clone.lock();
                             if visited_guard.contains(&url_to_fetch) {
                                 return (Vec::new(), Some("already_visited"));
                             }
-                            // Mark as visited immediately to prevent duplicates
                             visited_guard.insert(url_to_fetch.clone());
                         }
 
-                        tracing::debug!("Fetching from peer RPC at: {}", url_to_fetch);
+                        tracing::debug!("Fetching from URL: {}", url_to_fetch);
 
-                        // Fetch peers from this URL with a short timeout
+                        let base_url = if url_to_fetch.ends_with("/net_info") {
+                            url_to_fetch[0..url_to_fetch.len() - 9].to_string()
+                        } else {
+                            url_to_fetch.clone()
+                        };
+
+                        let status_url = format!("{}/status", base_url);
+
+                        let timeout_duration = tokio::time::Duration::from_secs(10);
+
+                        let status_result: Result<Result<Response, ReqwestError>, Elapsed> =
+                            tokio::time::timeout(timeout_duration, client.get(&status_url).send())
+                                .await;
+
+                        let (status_succeeded, is_live) = match status_result {
+                            Ok(Ok(resp)) if resp.status().is_success() => {
+                                let json_result: Result<
+                                    Result<StatusResponse, ReqwestError>,
+                                    Elapsed,
+                                > = tokio::time::timeout(
+                                    timeout_duration,
+                                    resp.json::<StatusResponse>(),
+                                )
+                                .await;
+                                match json_result {
+                                    Ok(Ok(json)) => (true, !json.result.sync_info.catching_up),
+                                    _ => (false, false),
+                                }
+                            }
+                            _ => (false, false),
+                        };
+
+                        {
+                            let mut all_peers_guard = all_peers_clone.lock();
+                            if let Some(p) = all_peers_guard.get_mut(&peer_clone.ip) {
+                                p.is_live = Some(is_live);
+                            }
+                        }
+
+                        if !status_succeeded {
+                            return (Vec::new(), Some("status_failed"));
+                        }
+
                         let timeout = tokio::time::Duration::from_secs(10);
                         match tokio::time::timeout(
                             timeout,
@@ -168,7 +210,7 @@ pub async fn follow_rpc_addresses(
                         {
                             Ok(Ok(new_peers)) => {
                                 tracing::debug!(
-                                    "Found {} peers from {}",
+                                    "Successfully parsed {} peers from {}",
                                     new_peers.len(),
                                     url_to_fetch
                                 );
@@ -187,30 +229,25 @@ pub async fn follow_rpc_addresses(
                                 };
                                 (Vec::new(), Some(error_type))
                             }
-                            Err(_) => {
-                                // Timeout
-                                (Vec::new(), Some("timeout"))
-                            }
+                            Err(_) => (Vec::new(), Some("timeout")),
                         }
                     } else {
-                        // URL resolution failed (typically local IPs)
                         (Vec::new(), Some("local_address"))
                     }
                 }
             })
-            .buffer_unordered(max_concurrent) // Process up to max_concurrent requests concurrently
+            .buffer_unordered(max_concurrent)
             .collect::<Vec<_>>()
             .await;
 
-        // Process results and add new peers
         for (new_peers, _error_type) in results {
             for peer in new_peers {
-                // Only add if IP is new to avoid duplicates
-                if !seen_ips.contains(&peer.ip) {
-                    seen_ips.insert(peer.ip.clone());
-                    all_peers.push(peer.clone());
+                let ip = peer.ip.clone();
 
-                    // Only add to the queue for further scanning if it has a valid public IP and an RPC address
+                if !seen_ips.contains(&ip) {
+                    seen_ips.insert(ip.clone());
+                    all_peers.lock().insert(ip, peer.clone());
+
                     if is_valid_public_ip(&peer.ip) && peer.rpc_address.is_some() {
                         queue.push(peer);
                     }
@@ -218,16 +255,20 @@ pub async fn follow_rpc_addresses(
             }
         }
 
-        // Shuffle the queue to have diverse sources rather than all peers from one source
-        let mut rng = rand::thread_rng();
+        let mut rng = {
+            let mut local_rng = thread_rng();
+            SmallRng::from_rng(&mut local_rng).unwrap()
+        };
         queue.shuffle(&mut rng);
     }
 
+    let final_peers: Vec<PeerInfo> = all_peers.lock().values().cloned().collect();
+
     tracing::info!(
         "Discovery complete: found {} unique peers, made {} queries",
-        all_peers.len(),
+        final_peers.len(),
         attempted_queries
     );
 
-    Ok(all_peers)
+    Ok(final_peers)
 }

@@ -3,7 +3,8 @@ use serde_json::json;
 use std::collections::HashMap;
 
 use crate::discovery::{ALL_DISCOVERED_PEERS, KNOWN_GOOD_PEERS};
-use crate::{cli::Cli, config::Config, error::AppError, models::PeerGeoInfo, peer_discovery};
+use crate::models::PeerGeoInfo;
+use crate::{cli::Cli, config::Config, error::AppError, peer_discovery};
 
 // Configure API routes
 #[allow(dead_code)]
@@ -17,7 +18,8 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .service(trigger_scan)
             .service(get_scan_status)
             .service(configure_cache)
-            .service(refresh_cache),
+            .service(refresh_cache)
+            .service(get_live_peers),
     );
 }
 
@@ -462,6 +464,73 @@ async fn refresh_cache(
     }
 }
 
+#[get("/live_peers/{network}")]
+async fn get_live_peers(
+    network: web::Path<String>,
+    db_pool: web::Data<Option<sqlx::PgPool>>,
+) -> impl Responder {
+    let network = network.into_inner();
+
+    // Function to format connection string
+    fn format_conn(peer: &PeerGeoInfo) -> Option<String> {
+        if peer.is_live == Some(true) {
+            if let (Some(id), Some(port)) = (&peer.node_id, peer.p2p_port) {
+                Some(format!("{}@{}:{}", id, peer.ip, port))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    if let Some(pool) = db_pool.as_ref() {
+        match crate::db::get_peers_by_network(pool, &network).await {
+            Ok(peers) => {
+                let live_conns: Vec<String> = peers
+                    .iter()
+                    .filter_map(|p| {
+                        // Convert PeerNode to PeerGeoInfo-like for formatting
+                        format_conn(&PeerGeoInfo {
+                            ip: p.ip.clone(),
+                            node_id: p.node_id.clone(),
+                            p2p_port: p.p2p_port.map(|p| p as u16),
+                            is_live: p.is_live,
+                            rpc_address: None,
+                            network: String::new(),
+                            country: None,
+                            region: None,
+                            province: None,
+                            state: None,
+                            city: None,
+                            isp: None,
+                            lat: None,
+                            lon: None,
+                            last_seen: None,
+                            active: false,
+                        })
+                    })
+                    .collect();
+                HttpResponse::Ok().json(live_conns)
+            }
+            Err(e) => HttpResponse::InternalServerError()
+                .json(json!({"error": format!("Failed to get live peers: {}", e)})),
+        }
+    } else {
+        match get_peers_by_network_from_redis(&network).await {
+            Ok(peers) => {
+                let live_conns: Vec<String> = peers.iter().filter_map(format_conn).collect();
+                HttpResponse::Ok().json(live_conns)
+            }
+            Err(_) => {
+                let memory_peers = get_peers_by_network_from_memory(&network);
+                let live_conns: Vec<String> = memory_peers.iter().filter_map(format_conn).collect();
+                HttpResponse::Ok().json(live_conns)
+            }
+        }
+    }
+}
+
 // Helper functions for Redis-based data retrieval
 async fn get_peers_from_redis() -> Result<Vec<PeerGeoInfo>, AppError> {
     let cache_lock = crate::redis_cache::REDIS_CACHE.lock().await;
@@ -554,6 +623,9 @@ fn get_peers_from_memory_cache() -> Vec<PeerGeoInfo> {
                 lon: None,
                 last_seen: None,
                 active: true,
+                is_live: peer.is_live,
+                node_id: peer.node_id.clone(),
+                p2p_port: peer.p2p_port,
             });
         }
     }
@@ -584,6 +656,9 @@ fn get_peers_by_network_from_memory(network: &str) -> Vec<PeerGeoInfo> {
                 lon: None,
                 last_seen: None,
                 active: true,
+                is_live: p.is_live,
+                node_id: p.node_id.clone(),
+                p2p_port: p.p2p_port,
             })
             .collect();
     }

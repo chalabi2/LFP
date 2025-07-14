@@ -1,6 +1,9 @@
 use crate::{cli::Cli, config::Config, error::AppError};
 use futures::future::join_all;
+use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
+use rand::thread_rng;
+use rand::SeedableRng;
 use reqwest::Client;
 use sqlx::{Pool, Postgres};
 use std::collections::HashMap;
@@ -701,12 +704,12 @@ async fn scan_chain_with_cached_peers(
     }
 
     // Shuffle the peers to avoid hitting the same ones repeatedly
-    let shuffled_peers = {
-        let mut rng = rand::thread_rng();
-        let mut shuffled_peers = cached_peers.clone();
-        shuffled_peers.shuffle(&mut rng);
-        shuffled_peers
+    let mut rng = {
+        let mut local_rng = thread_rng();
+        SmallRng::from_rng(&mut local_rng).unwrap()
     };
+    let mut shuffled_peers = cached_peers.clone();
+    shuffled_peers.shuffle(&mut rng);
 
     // Use a semaphore to limit concurrent requests
     let semaphore = Arc::new(Semaphore::new(WORKERS_PER_CHAIN));

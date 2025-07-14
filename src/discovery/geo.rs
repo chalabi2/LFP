@@ -109,6 +109,9 @@ pub async fn fetch_geo_info_batch(
                 },
                 last_seen: None,
                 active: true,
+                is_live: peer.is_live,
+                node_id: peer.node_id.clone(),
+                p2p_port: peer.p2p_port,
             };
 
             all_geo_info.push(peer_geo_info);

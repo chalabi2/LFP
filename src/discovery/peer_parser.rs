@@ -23,12 +23,13 @@ pub async fn fetch_peer_info(
 
     tracing::debug!("Fetching from URL: {}", net_info_url);
 
-    // Backup URL for cases where /net_info might not be the correct endpoint
-    let status_url = if url.ends_with("/") {
-        format!("{}status", url)
+    let _base_url = if net_info_url.ends_with("/net_info") {
+        net_info_url[0..net_info_url.len() - 9].to_string()
     } else {
-        format!("{}/status", url)
+        net_info_url.clone()
     };
+
+    // let _status_url = format!("{}/status", base_url);  // Comment out or remove
 
     // Make the request - add retries for transient errors
     let mut attempts = 0;
@@ -107,12 +108,8 @@ pub async fn fetch_peer_info(
                                 return Ok(network_specific_peers);
                             }
 
-                            // No peers found despite valid response - try status endpoint as a last resort
-                            tracing::debug!(
-                                "No peers found in valid response, trying status endpoint"
-                            );
-                            return try_fetch_from_status_endpoint(client, &status_url, _network)
-                                .await;
+                            // Return empty if no peers found
+                            return Ok(vec![]);
                         }
                         Err(e) => {
                             tracing::debug!(
@@ -122,9 +119,6 @@ pub async fn fetch_peer_info(
                             );
                         }
                     }
-                } else if response.status().as_u16() == 400 {
-                    // Try the status endpoint as a fallback for peers
-                    return try_fetch_from_status_endpoint(client, &status_url, _network).await;
                 } else if response.status().as_u16() == 429 {
                     // Handle rate limiting with longer backoff
                     let retry_after = response
@@ -185,101 +179,12 @@ pub async fn fetch_peer_info(
         }
     }
 
-    // Try the status endpoint as a last resort
-    let status_result = try_fetch_from_status_endpoint(client, &status_url, _network).await?;
-    if !status_result.is_empty() {
-        return Ok(status_result);
-    }
-
     // If all attempts failed, return empty list rather than error
     tracing::debug!(
         "Returning empty peer list after all attempts for {}",
         net_info_url
     );
     Ok(vec![])
-}
-
-/// Try to fetch peer info from the /status endpoint which some networks use
-async fn try_fetch_from_status_endpoint(
-    client: &Client,
-    status_url: &str,
-    _network: Option<&str>,
-) -> Result<Vec<PeerInfo>, AppError> {
-    tracing::debug!("Trying to fetch peers from status endpoint: {}", status_url);
-
-    // Try to fetch from status endpoint
-    match client.get(status_url).send().await {
-        Ok(response) => {
-            if response.status().is_success() {
-                if let Ok(response_text) = response.text().await {
-                    // Check if response contains peers data
-                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&response_text) {
-                        // Try to find peers in the value
-                        if let Some(peers) = extract_peers_from_status_response(&value) {
-                            tracing::info!("Found {} peers in status endpoint", peers.len());
-                            return Ok(peers);
-                        }
-                    }
-                }
-            } else if response.status().as_u16() == 429 {
-                // Handle rate limiting
-                let retry_after = response
-                    .headers()
-                    .get("retry-after")
-                    .and_then(|h| h.to_str().ok())
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .unwrap_or(5);
-
-                tracing::warn!(
-                    "Rate limited (429) from status endpoint {}, backing off for {} seconds",
-                    status_url,
-                    retry_after
-                );
-
-                // Return empty vector to avoid retries
-                return Ok(vec![]);
-            }
-        }
-        Err(e) => {
-            // Check for rate limit errors
-            if e.to_string().contains("429") || e.to_string().contains("Too Many Requests") {
-                tracing::warn!(
-                    "Possible rate limiting from status endpoint {}: {}",
-                    status_url,
-                    e
-                );
-                return Ok(vec![]);
-            }
-
-            tracing::debug!("Failed to fetch from status endpoint: {}", e);
-        }
-    }
-
-    Ok(vec![])
-}
-
-/// Extract peers from status response
-fn extract_peers_from_status_response(value: &serde_json::Value) -> Option<Vec<PeerInfo>> {
-    // Look for peers in common locations in status responses
-    let possible_paths = [
-        value.get("result").and_then(|v| v.get("peers")),
-        value.get("peers"),
-        value
-            .get("result")
-            .and_then(|v| v.get("node_info"))
-            .and_then(|v| v.get("peers")),
-    ];
-
-    for path in possible_paths.iter().flatten() {
-        if let Some(peers_array) = path.as_array() {
-            let peers = extract_peers_from_array(peers_array);
-            if !peers.is_empty() {
-                return Some(peers);
-            }
-        }
-    }
-
-    None
 }
 
 /// Parse a response using a flexible approach that works for multiple networks
@@ -408,7 +313,26 @@ fn extract_peers_from_array(peers_array: &[serde_json::Value]) -> Vec<PeerInfo> 
                     tracing::debug!("Found peer with IP: {} but no RPC address", ip);
                 }
 
-                peers.push(PeerInfo { ip, rpc_address });
+                let node_id = peer
+                    .get("node_info")
+                    .and_then(|n| n.get("id"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+
+                let p2p_port = peer
+                    .get("node_info")
+                    .and_then(|n| n.get("listen_addr"))
+                    .and_then(|v| v.as_str())
+                    .and_then(|addr| addr.split(':').last())
+                    .and_then(|p| p.parse::<u16>().ok());
+
+                peers.push(PeerInfo {
+                    ip,
+                    rpc_address,
+                    is_live: None, // Will be set later
+                    node_id,
+                    p2p_port,
+                });
             }
         }
     }
@@ -528,7 +452,22 @@ fn parse_standard_peer_info(peers: &[PeerData]) -> Result<Vec<PeerInfo>, AppErro
             }
             .or_else(|| peer.rpc_address.clone());
 
-            Some(PeerInfo { ip, rpc_address })
+            let node_id = peer.node_info.as_ref().and_then(|n| n.id.clone());
+
+            let p2p_port = peer
+                .node_info
+                .as_ref()
+                .and_then(|n| n.listen_addr.as_ref())
+                .and_then(|addr| addr.split(':').last())
+                .and_then(|p| p.parse::<u16>().ok());
+
+            Some(PeerInfo {
+                ip,
+                rpc_address,
+                is_live: None,
+                node_id,
+                p2p_port,
+            })
         })
         .collect();
 
@@ -573,7 +512,22 @@ fn parse_sei_peer_info(peers: &[SeiPeerData]) -> Result<Vec<PeerInfo>, AppError>
             }
             .or_else(|| peer.rpc_address.clone());
 
-            Some(PeerInfo { ip, rpc_address })
+            let node_id = peer.node_info.as_ref().and_then(|n| n.id.clone());
+
+            let p2p_port = peer
+                .node_info
+                .as_ref()
+                .and_then(|n| n.listen_addr.as_ref())
+                .and_then(|addr| addr.split(':').last())
+                .and_then(|p| p.parse::<u16>().ok());
+
+            Some(PeerInfo {
+                ip,
+                rpc_address,
+                is_live: None,
+                node_id,
+                p2p_port,
+            })
         })
         .collect();
 
@@ -608,7 +562,15 @@ fn parse_akash_peer_info(peers: &[AkashPeerData]) -> Result<Vec<PeerInfo>, AppEr
             // Use the RPC address if available
             let rpc_address = peer.rpc_address.clone();
 
-            Some(PeerInfo { ip, rpc_address })
+            let node_id = None; // Adjust if Akash has node_info
+            let p2p_port = None; // Adjust accordingly
+            Some(PeerInfo {
+                ip,
+                rpc_address,
+                is_live: None,
+                node_id,
+                p2p_port,
+            })
         })
         .collect();
 

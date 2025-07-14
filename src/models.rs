@@ -8,6 +8,9 @@ use uuid::Uuid;
 pub struct PeerInfo {
     pub ip: String,
     pub rpc_address: Option<String>,
+    pub is_live: Option<bool>,
+    pub node_id: Option<String>,
+    pub p2p_port: Option<u16>,
 }
 
 // Implement Hash for PeerInfo
@@ -30,7 +33,7 @@ impl PartialEq for PeerInfo {
 impl Eq for PeerInfo {}
 
 /// Extended peer information with geo data
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PeerGeoInfo {
     pub ip: String,
     #[serde(rename = "rpcAddress")]
@@ -47,6 +50,9 @@ pub struct PeerGeoInfo {
     #[serde(rename = "lastSeen")]
     pub last_seen: Option<DateTime<Utc>>,
     pub active: bool,
+    pub is_live: Option<bool>,
+    pub node_id: Option<String>,
+    pub p2p_port: Option<u16>,
 }
 
 /// Represents a peer node stored in the database
@@ -68,6 +74,9 @@ pub struct PeerNode {
     #[serde(rename = "lastSeen")]
     pub last_seen: DateTime<Utc>,
     pub active: bool,
+    pub is_live: Option<bool>,
+    pub node_id: Option<String>,
+    pub p2p_port: Option<i32>, // Use i32 for SQL
 }
 
 /// Represents the structure returned by Tendermint RPC net_info
@@ -200,4 +209,21 @@ impl Default for AppCache {
             last_refresh: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatusResponse {
+    pub jsonrpc: String,
+    pub id: String,
+    pub result: StatusResult,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatusResult {
+    pub sync_info: SyncInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncInfo {
+    pub catching_up: bool,
 }
