@@ -88,12 +88,64 @@ OPTIONS:
 
 ### API Endpoints
 
-- `GET /health` - Health check endpoint
-- `GET /peers` - Get all peers
-- `GET /peers/network/:network` - Get peers by network
-- `GET /peers/country/:country` - Get peers by country
-- `POST /peers/scan/now` - Trigger an immediate scan
-- `GET /peers/stats` - Get peer statistics
+#### Health Check
+
+- `GET /health`
+  - Returns server status and version
+  - Response: `{"status": "ok", "version": "x.x.x"}`
+
+#### Peer Information
+
+- `GET /peers`
+
+  - Returns all discovered peers across all networks
+  - Response includes peer details with geolocation data
+
+- `GET /peers/network/{network}`
+
+  - Returns peers for a specific network
+  - Query Parameters:
+    - `active`: Filter by active status (true/false)
+  - Example: `/peers/network/osmosis?active=true`
+
+- `GET /live_peers/{network}`
+  - Returns list of live peer connection strings in format `node_id@ip:port`
+  - Only includes peers where is_live=true and have both node_id and p2p_port
+  - Example: `/live_peers/osmosis`
+
+#### Statistics and Status
+
+- `GET /stats`
+
+  - Returns peer statistics across all networks
+  - Includes total peers, peers by network, and geographical distribution
+
+- `GET /peers/scan/status`
+  - Shows current scan status and cache information
+  - Includes per-network peer counts and configuration
+
+#### Network Scanning
+
+- `GET /peers/scan/{network}`
+  - Triggers an immediate scan for specified network
+  - Example: `/peers/scan/osmosis`
+  - Response: `{"status": "ok", "message": "Scan for network 'osmosis' started"}`
+
+#### Cache Management
+
+- `GET /cache/configure`
+
+  - Configure cache settings
+  - Query Parameters:
+    - `ttl`: Cache time-to-live in seconds
+    - `refresh_interval`: Cache refresh interval in seconds
+  - Example: `/cache/configure?ttl=3600&refresh_interval=1800`
+
+- `GET /cache/refresh`
+  - Force refresh the cache
+  - Query Parameters:
+    - `network`: Optional specific network to refresh
+  - Example: `/cache/refresh?network=osmosis`
 
 ## Architecture
 
