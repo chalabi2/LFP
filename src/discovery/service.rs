@@ -45,8 +45,8 @@ impl NetworkScanState {
     #[allow(dead_code)]
     fn new() -> Self {
         Self {
-            max_stable_scans: 3,
-            min_change_threshold: 5.0, // 5% change
+            max_stable_scans: 50, // Much higher threshold - networks need to be stable for 50 scans
+            min_change_threshold: 1.0, // Much lower threshold - 1% change is significant
             peer_counts: HashMap::new(),
             stable_scan_count: HashMap::new(),
             last_scan_time: HashMap::new(),
@@ -58,6 +58,13 @@ impl NetworkScanState {
     fn update_peer_count(&mut self, network: &str, new_count: usize) -> bool {
         // Record scan count
         *self.scan_count.entry(network.to_string()).or_insert(0) += 1;
+
+        // Check if this was a time-based reset (6+ hours since last scan)
+        let was_time_based_reset = if let Some(last_scan) = self.last_scan_time.get(network) {
+            last_scan.elapsed() > Duration::from_secs(6 * 3600)
+        } else {
+            false
+        };
 
         // Update last scan time
         self.last_scan_time
@@ -81,9 +88,12 @@ impl NetworkScanState {
         let is_significant = percent_change >= self.min_change_threshold;
 
         // Update stability counter
-        if is_significant {
-            // Reset stable count if significant change
+        if is_significant || was_time_based_reset {
+            // Reset stable count if significant change or time-based reset
             self.stable_scan_count.insert(network.to_string(), 0);
+            if was_time_based_reset {
+                tracing::info!("Network {} stability reset due to time-based scan", network);
+            }
         } else {
             // Increment stable count
             let count = self
@@ -113,7 +123,19 @@ impl NetworkScanState {
     #[allow(dead_code)]
     fn should_scan_network(&self, network: &str) -> bool {
         let stable_count = *self.stable_scan_count.get(network).unwrap_or(&0);
-        stable_count < self.max_stable_scans
+
+        // Check if we should scan based on stability
+        let should_scan_by_stability = stable_count < self.max_stable_scans;
+
+        // Check if enough time has passed since last scan (6 hours)
+        let should_scan_by_time = if let Some(last_scan) = self.last_scan_time.get(network) {
+            last_scan.elapsed() > Duration::from_secs(6 * 3600) // 6 hours
+        } else {
+            true // Never scanned before
+        };
+
+        // Scan if either condition is met
+        should_scan_by_stability || should_scan_by_time
     }
 }
 
