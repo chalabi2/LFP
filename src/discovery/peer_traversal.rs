@@ -94,12 +94,12 @@ pub async fn follow_rpc_addresses(
         .cloned()
         .collect();
 
-    let max_query_attempts = if max_peers > 0 { max_peers } else { 50 };
+    let max_query_attempts = if max_peers > 0 { max_peers } else { 500 }; // Increased from 50 to 500
     let mut attempted_queries = 0;
 
     let mut current_depth = 0;
 
-    let max_peers_per_depth = 10;
+    let max_peers_per_depth = 50; // Increased from 10 to 50
 
     while !queue.is_empty() && (max_depth == 0 || current_depth < max_depth) {
         // Check if we've reached the maximum number of peers
@@ -183,17 +183,47 @@ pub async fn follow_rpc_addresses(
                                 )
                                 .await;
                                 match json_result {
-                                    Ok(Ok(json)) => (true, !json.result.sync_info.catching_up),
-                                    _ => (false, false),
+                                    Ok(Ok(_json)) => {
+                                        // Consider a peer live if we can successfully get status.
+                                        // Be more permissive - even catching_up nodes are useful
+                                        let is_responsive = true;
+                                        (true, is_responsive)
+                                    },
+                                    Ok(Err(_)) => {
+                                        // HTTP success but invalid JSON - still consider it live
+                                        tracing::debug!("Got HTTP 200 but invalid JSON from {}, considering live", status_url);
+                                        (true, true)
+                                    },
+                                    Err(_) => {
+                                        // Timeout on JSON parsing - still consider it live if we got HTTP 200
+                                        tracing::debug!("Timeout parsing JSON from {}, but HTTP 200, considering live", status_url);
+                                        (true, true)
+                                    },
                                 }
                             }
-                            _ => (false, false),
+                            Ok(Ok(resp)) => {
+                                // HTTP response but not 2xx - peer is reachable but maybe unhealthy
+                                tracing::debug!("Got HTTP {} from {}, considering not live", resp.status(), status_url);
+                                (true, false)
+                            }
+                            Ok(Err(_)) => {
+                                // Network error - peer not reachable
+                                (false, false)
+                            }
+                            Err(_) => {
+                                // Timeout - peer not reachable
+                                (false, false)
+                            }
                         };
 
                         {
                             let mut all_peers_guard = all_peers_clone.lock();
                             if let Some(p) = all_peers_guard.get_mut(&peer_clone.ip) {
                                 p.is_live = Some(is_live);
+                                tracing::debug!(
+                                    "Liveness test for {} ({}): status_succeeded={}, is_live={}", 
+                                    peer_clone.ip, status_url, status_succeeded, is_live
+                                );
                             }
                         }
 

@@ -129,8 +129,8 @@ pub async fn scan_network(
         network
     );
 
-    // Only store up to 50 peers to keep the cache manageable
-    let max_peers_to_cache = 50;
+    // Store more peers in cache to enable better recursive discovery
+    let max_peers_to_cache = 200; // Increased from 50 to 200
     cache::update_cached_peers(network, good_peers, max_peers_to_cache);
 
     // Get geographical information for all discovered peers

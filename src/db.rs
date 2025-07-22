@@ -47,7 +47,10 @@ pub async fn upsert_peers_batch(
                     isp = EXCLUDED.isp,
                     lat = EXCLUDED.lat,
                     lon = EXCLUDED.lon,
-                    last_seen = NOW(),
+                    last_seen = CASE 
+                        WHEN EXCLUDED.is_live = TRUE THEN NOW() 
+                        ELSE COALESCE("PeerNode".last_seen, NOW()) 
+                    END,
                     active = TRUE,
                     is_live = EXCLUDED.is_live,
                     node_id = EXCLUDED.node_id,

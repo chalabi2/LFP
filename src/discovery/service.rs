@@ -48,8 +48,8 @@ impl NetworkScanState {
     #[allow(dead_code)]
     fn new() -> Self {
         Self {
-            max_stable_scans: 50, // Much higher threshold - networks need to be stable for 50 scans
-            min_change_threshold: 1.0, // Much lower threshold - 1% change is significant
+            max_stable_scans: 10, // Lower threshold - only 10 stable scans before considering stable
+            min_change_threshold: 5.0, // Higher threshold - 5% change is significant
             peer_counts: HashMap::new(),
             stable_scan_count: HashMap::new(),
             last_scan_time: HashMap::new(),
@@ -62,9 +62,9 @@ impl NetworkScanState {
         // Record scan count
         *self.scan_count.entry(network.to_string()).or_insert(0) += 1;
 
-        // Check if this was a time-based reset (6+ hours since last scan)
+        // Check if this was a time-based reset (2+ hours since last scan)
         let was_time_based_reset = if let Some(last_scan) = self.last_scan_time.get(network) {
-            last_scan.elapsed() > Duration::from_secs(6 * 3600)
+            last_scan.elapsed() > Duration::from_secs(2 * 3600) // Reduced from 6 to 2 hours
         } else {
             false
         };
@@ -130,9 +130,9 @@ impl NetworkScanState {
         // Check if we should scan based on stability
         let should_scan_by_stability = stable_count < self.max_stable_scans;
 
-        // Check if enough time has passed since last scan (6 hours)
+        // Check if enough time has passed since last scan (2 hours)
         let should_scan_by_time = if let Some(last_scan) = self.last_scan_time.get(network) {
-            last_scan.elapsed() > Duration::from_secs(6 * 3600) // 6 hours
+            last_scan.elapsed() > Duration::from_secs(2 * 3600) // Reduced from 6 to 2 hours
         } else {
             true // Never scanned before
         };
@@ -393,7 +393,7 @@ async fn scan_chain_with_multiple_workers(
     // Manage worker handles
     let mut workers = Vec::new();
     let mut failed_endpoints = HashSet::new();
-    let max_workers = 10; // Lower this to reduce parallel scanning
+    let max_workers = 20; // Increased from 10 to 20 for more parallel scanning
     let max_consecutive_failures = 3;
     let mut consecutive_failures = 0;
 
@@ -513,7 +513,7 @@ async fn scan_chain_with_multiple_workers(
         // Try to get more workers from the peer cache
         let all_peers = cache::get_cached_peers(network);
         if all_peers.len() > worker_index {
-            let max_to_add = std::cmp::min(2, max_workers - active_workers);
+            let max_to_add = std::cmp::min(5, max_workers - active_workers); // Increased from 2 to 5
             let mut added = 0;
 
             // Spawn workers using next few peers from the cache
@@ -714,8 +714,8 @@ async fn scan_chain_with_cached_peers(
     // Use a semaphore to limit concurrent requests
     let semaphore = Arc::new(Semaphore::new(WORKERS_PER_CHAIN));
 
-    // Take only up to 10 peers to try
-    let peers_to_try = &shuffled_peers[0..std::cmp::min(10, shuffled_peers.len())];
+    // Take more peers to try for better coverage
+    let peers_to_try = &shuffled_peers[0..std::cmp::min(30, shuffled_peers.len())]; // Increased from 10 to 30
     tracing::info!(
         "Trying {} cached peers for network {}",
         peers_to_try.len(),

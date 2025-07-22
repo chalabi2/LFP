@@ -46,7 +46,7 @@ pub struct Cli {
     pub scan_on_startup: bool,
 
     /// The maximum number of concurrent requests
-    #[clap(long, default_value = "25")]
+    #[clap(long, default_value = "50")]
     pub max_concurrent_requests: usize,
 
     /// Maximum number of chains to process concurrently

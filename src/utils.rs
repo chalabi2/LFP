@@ -66,15 +66,30 @@ pub fn transform_rpc_address(rpc_address: &str, peer_ip: &str) -> Option<String>
         // For 0.0.0.0 and other local addresses, replace with peer's real IP
         format!("http://{}:{}", peer_ip, port)
     } else {
-        // Clean the RPC address format
+        // Clean the RPC address format - handle tcp:// protocol better
         let cleaned_url = rpc_address
             .replace("tcp://", "")
             .replace("http://", "")
             .replace("https://", "");
 
-        // Add proper protocol
-        format!("http://{}", cleaned_url)
+        // If the cleaned URL still contains the peer's IP, just use it with http
+        if cleaned_url.contains(peer_ip) {
+            format!("http://{}", cleaned_url)
+        } else {
+            // Extract port and use peer's IP instead of whatever was in the address
+            let port = extract_port_from_address(rpc_address);
+            format!("http://{}:{}", peer_ip, port)
+        }
     };
+
+    // Validate the final URL makes sense
+    if !protocol_added.contains(peer_ip) {
+        tracing::warn!(
+            "Transformed RPC address doesn't contain peer IP: {} -> {}",
+            rpc_address,
+            protocol_added
+        );
+    }
 
     Some(protocol_added)
 }
