@@ -153,7 +153,8 @@ lfp works by:
 
 1. Starting with a known RPC node for each blockchain network
 2. Fetching peer information from that node
-3. Recursively following each peer's RPC address to discover more peers
-4. Enriching peer data with geographical information
-5. Storing the results in a PostgreSQL database
-6. Exposing the data through a REST API
+3. Filtering peers based on health (sync height, responsiveness)
+4. Recursively following each peer's RPC address to discover more peers
+5. Enriching peer data with geographical information
+6. Storing the results in a PostgreSQL database
+7. Exposing the data through a REST API
