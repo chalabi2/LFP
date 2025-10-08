@@ -285,8 +285,8 @@ fn extract_peers_from_array(peers_array: &[serde_json::Value]) -> Vec<PeerInfo> 
         let ip = remote_ip.or_else(|| fallback_ip.or_else(|| ip_from_addr.or(ip_from_listen_addr)));
 
         if let Some(ip) = ip {
-            // Only filter by valid public IP if we don't have a remote_ip
-            if is_valid_public_ip(&ip) || peer.get("remote_ip").is_some() {
+            // Only accept valid public IPs
+            if is_valid_public_ip(&ip) {
                 // Extract RPC address from various possible fields
                 let rpc_address = peer
                     .get("rpc_address")

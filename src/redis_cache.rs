@@ -4,6 +4,7 @@ use redis::aio::ConnectionManager;
 use tokio::sync::Mutex;
 
 use crate::{error::AppError, models::PeerGeoInfo};
+use crate::utils::is_valid_public_ip;
 
 // TTL in seconds for Redis keys (1 year - effectively permanent but allows cleanup if needed)
 const PEER_KEY_TTL: usize = 31_536_000;
@@ -46,8 +47,8 @@ impl RedisCache {
         let mut pipe = redis::pipe();
         let network_set_key = format!("network:{}:peers", network);
 
-        // Add each peer to the pipeline
-        for peer in peers {
+        // Add each peer to the pipeline (public IPs only)
+        for peer in peers.iter().filter(|p| is_valid_public_ip(&p.ip)) {
             let key = format!("peer:{}:{}", network, peer.ip);
 
             // Serialize peer to JSON
@@ -155,6 +156,68 @@ impl RedisCache {
 
         tracing::info!("Deleted {} peers for network {}", peer_keys.len(), network);
         Ok(())
+    }
+
+    /// Purge non-public IP peers across all networks from Redis
+    pub async fn purge_non_public_peers_all_networks(&self) -> Result<u64, AppError> {
+        let mut conn = self.client.clone();
+
+        // Find all network peer sets
+        let mut cursor: u64 = 0;
+        let mut total_deleted: u64 = 0;
+        loop {
+            // SCAN for set keys matching network:*:peers
+            let scan_result: (u64, Vec<String>) = redis::cmd("SCAN")
+                .arg(cursor)
+                .arg("MATCH")
+                .arg("network:*:peers")
+                .arg("COUNT")
+                .arg(1000)
+                .query_async(&mut conn)
+                .await
+                .map_err(|e| AppError::CacheError(format!("Failed to SCAN Redis: {}", e)))?;
+
+            cursor = scan_result.0;
+            let set_keys = scan_result.1;
+
+            for set_key in set_keys {
+                // Get members of the set (peer keys)
+                let peer_keys: Vec<String> = redis::cmd("SMEMBERS")
+                    .arg(&set_key)
+                    .query_async(&mut conn)
+                    .await
+                    .map_err(|e| AppError::CacheError(format!("Failed to get members for {}: {}", set_key, e)))?;
+
+                if peer_keys.is_empty() {
+                    continue;
+                }
+
+                let mut pipe = redis::pipe();
+                let mut deleted_here: u64 = 0;
+
+                for peer_key in peer_keys {
+                    // peer key format: peer:{network}:{ip}
+                    let ip = peer_key.split(':').last().unwrap_or("");
+                    if !is_valid_public_ip(ip) {
+                        pipe.cmd("DEL").arg(&peer_key).ignore();
+                        pipe.cmd("SREM").arg(&set_key).arg(&peer_key).ignore();
+                        deleted_here += 1;
+                    }
+                }
+
+                if deleted_here > 0 {
+                    pipe.query_async::<_, ()>(&mut conn)
+                        .await
+                        .map_err(|e| AppError::CacheError(format!("Failed to purge peers from Redis: {}", e)))?;
+                    total_deleted += deleted_here;
+                    tracing::info!("Purged {} non-public peers from set {}", deleted_here, set_key);
+                }
+            }
+
+            if cursor == 0 { break; }
+        }
+
+        Ok(total_deleted)
     }
 }
 

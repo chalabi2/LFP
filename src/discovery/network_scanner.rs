@@ -153,7 +153,10 @@ pub async fn scan_network(
         // Store peers in Redis for permanent storage with deduplication
         let mut unique_peers = HashMap::new();
         for peer in peers_with_geo.iter() {
-            unique_peers.insert(peer.ip.clone(), peer.clone());
+            // Only keep public IPs defensively
+            if crate::utils::is_valid_public_ip(&peer.ip) {
+                unique_peers.insert(peer.ip.clone(), peer.clone());
+            }
         }
 
         let unique_peer_vec: Vec<PeerGeoInfo> = unique_peers.into_values().collect();

@@ -7,6 +7,7 @@ use crate::{
     error::AppError,
     models::{CountryStats, NetworkStats, PeerGeoInfo, PeerNode, PeerStats},
 };
+// no extra imports needed
 
 /// Batch update peer information in the database
 pub async fn upsert_peers_batch(
@@ -29,8 +30,11 @@ pub async fn upsert_peers_batch(
             .await
             .map_err(|e| AppError::DatabaseError(format!("Failed to start transaction: {}", e)))?;
 
-        // Update in batches
-        for peer in chunk {
+        // Update in batches (filter to public IPs defensively)
+        for peer in chunk
+            .iter()
+            .filter(|p| crate::utils::is_valid_public_ip(&p.ip))
+        {
             sqlx::query(
                 r#"
                 INSERT INTO "PeerNode" (
@@ -97,6 +101,40 @@ pub async fn upsert_peers_batch(
     .map_err(|e| AppError::DatabaseError(format!("Failed to mark inactive peers: {}", e)))?;
 
     Ok(())
+}
+
+/// Remove any peers with non-public IPs from the database across all networks
+pub async fn purge_non_public_peers(pool: &Pool<Postgres>) -> Result<u64, AppError> {
+    // Define a SQL predicate that matches private/local IPv4 ranges and common IPv6 local ranges
+    // Note: SQL can't easily express full IPv6 checks; we focus on IPv4 and common bad literals.
+    let result = sqlx::query(
+        r#"
+        DELETE FROM "PeerNode"
+        WHERE (
+            ip LIKE '10.%' OR
+            ip LIKE '192.168.%' OR
+            ip LIKE '172.1%.__' OR  -- covers 172.16. to 172.19.
+            ip LIKE '172.2%.__' OR  -- covers 172.20. to 172.29.
+            ip LIKE '172.3%.__' OR  -- covers 172.30.-172.31.
+            ip LIKE '100.6%.__' OR  -- coarse CGNAT match 100.64-100.69
+            ip LIKE '100.7%.__' OR  -- coarse CGNAT match 100.70-100.79
+            ip LIKE '127.%' OR
+            ip LIKE '0.%' OR
+            ip LIKE '169.254.%' OR
+            ip = '::1' OR
+            ip LIKE 'fe80:%' OR
+            ip LIKE 'fc__:%' OR
+            ip LIKE 'fd__:%'
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| AppError::DatabaseError(format!("Failed to purge non-public peers: {}", e)))?;
+
+    let count = result.rows_affected();
+    tracing::info!("Purged {} non-public peers from database", count);
+    Ok(count)
 }
 
 /// Get all peers from the database

@@ -1,3 +1,4 @@
+use crate::utils::is_valid_public_ip;
 use crate::{
     error::AppError,
     models::{GeoApiResponse, PeerGeoInfo, PeerInfo},
@@ -15,9 +16,9 @@ pub async fn fetch_geo_info_batch(
     const BATCH_SIZE: usize = 100; // IP-API allows up to 100 IPs per batch
     let mut all_geo_info = Vec::new();
 
-    // Get unique IPs only
+    // Filter to public IPs and deduplicate by IP
     let mut unique_peers = HashMap::new();
-    for peer in peers {
+    for peer in peers.iter().filter(|p| is_valid_public_ip(&p.ip)) {
         unique_peers
             .entry(peer.ip.clone())
             .or_insert_with(|| peer.clone());

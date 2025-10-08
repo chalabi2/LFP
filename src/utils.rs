@@ -23,6 +23,11 @@ pub fn is_valid_public_ip(ip: &str) -> bool {
                 return false;
             }
 
+            // Carrier-Grade NAT (RFC 6598)
+            if octets[0] == 100 && (octets[1] >= 64 && octets[1] <= 127) {
+                return false;
+            }
+
             // Loopback, link-local, and other special ranges
             if octets[0] == 0 ||     // This network
                octets[0] == 127 ||   // Loopback
@@ -40,9 +45,18 @@ pub fn is_valid_public_ip(ip: &str) -> bool {
 
             true
         }
-        IpAddr::V6(_) => {
-            // For simplicity, we're allowing all IPv6 addresses that aren't loopback or link-local
-            !parsed_ip.is_loopback() && !parsed_ip.is_unspecified()
+        IpAddr::V6(v6) => {
+            // Exclude unspecified, loopback, link-local (fe80::/10), and unique-local (fc00::/7)
+            if v6.is_unspecified() || v6.is_loopback() {
+                return false;
+            }
+
+            // is_unicast_link_local covers fe80::/10; is_unique_local covers fc00::/7
+            if v6.is_unicast_link_local() || v6.is_unique_local() {
+                return false;
+            }
+
+            true
         }
     }
 }

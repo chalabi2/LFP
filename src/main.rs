@@ -68,6 +68,14 @@ async fn main() -> std::io::Result<()> {
             tracing::info!("Continuing without Redis cache");
         } else {
             tracing::info!("Redis cache initialized successfully");
+            // After init, purge any non-public IP peers across all networks
+            let cache_lock = redis_cache::REDIS_CACHE.lock().await;
+            if let Some(redis_cache) = cache_lock.as_ref() {
+                match redis_cache.purge_non_public_peers_all_networks().await {
+                    Ok(count) => tracing::info!("Purged {} non-public peers from Redis", count),
+                    Err(e) => tracing::warn!("Failed to purge non-public peers from Redis: {}", e),
+                }
+            }
         }
     } else {
         tracing::info!("No REDIS_URL provided, running without Redis cache");
@@ -100,6 +108,14 @@ async fn main() -> std::io::Result<()> {
         tracing::info!("No DATABASE_URL provided, running in memory-only mode");
         None
     };
+
+    // If DB is available, purge any non-public peers at startup
+    if let Some(pool) = db_pool.as_ref() {
+        match db::purge_non_public_peers(pool).await {
+            Ok(count) => tracing::info!("Purged {} non-public peers from database", count),
+            Err(e) => tracing::warn!("Failed to purge non-public peers from database: {}", e),
+        }
+    }
 
     // Collect background task handles to wait for them during shutdown
     let mut task_handles = Vec::new();
